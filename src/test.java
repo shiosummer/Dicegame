@@ -1,36 +1,47 @@
-import java.util.List;
-
 public class test {
     public static void main(String[] args) {
-        // 1. 创建外部类实例
-        Dice_Player outer = new Dice_Player();
+        // 1. 实例化最外层的环境类
+        Dice_Player gameContext = new Dice_Player();
+        AI_Logic aiLogicContext = new AI_Logic();
 
-        // 2. 创建一个具体的玩家（这里使用匿名内部类来实现抽象方法）
-        Dice_Player.Player player = outer.new Player("张三") {
-            @Override
-            public int[] makeDecision(int[] currentBid, int totalDiceCount) {
-                // 简单的测试逻辑：总是比上家多喊一个
-                if (currentBid == null) return new int[]{2, 1}; // 初始叫 2个1
-                return new int[]{currentBid[0] + 1, currentBid[1]};
-            }
-        };
+        // 2. 创建一个高级 AI 玩家 (Difficulty = 2)
+        // 注意：内部类的实例化语法为 aiLogicContext.new AIPlayer(...)
+        AI_Logic.AIPlayer bot = aiLogicContext.new AIPlayer(gameContext, "智脑阿强", 2);
 
-        System.out.println("玩家 " + player.getName() + " 已就绪。");
+        System.out.println("=== 游戏模拟开始 ===");
+        System.out.println("玩家名称: " + bot.getName());
 
-        // 3. 测试摇骰子
-        System.out.println("--- 正在摇骰子 ---");
-        player.rollDice();
-
-        // 4. 打印骰子点数
-        List<Dice_Player.Dice> hand = player.getDice();
-        System.out.print("手牌点数：");
-        for (Dice_Player.Dice d : hand) {
+        // 3. 模拟摇骰子
+        bot.rollDice();
+        System.out.print("AI 手里的骰子: ");
+        for (Dice_Player.Dice d : bot.getDice()) {
             System.out.print("[" + d.getValue() + "] ");
         }
-        System.out.println();
+        System.out.println("\n----------------------------");
 
-        // 5. 测试决策逻辑
-        int[] myBid = player.makeDecision(new int[]{3, 4}, 10);
-        System.out.println("上家叫 3个4，" + player.getName() + " 叫: " + myBid[0] + "个" + myBid[1]);
+        // 4. 测试场景 A：AI 作为先手叫点 (currentBid 为 null)
+        // 假设全场共有 2 个玩家，总骰子数为 10
+        int totalDice = 10;
+        int[] firstBid = bot.makeDecision(null, totalDice);
+        System.out.println("场景 A (AI先手) -> AI 叫点: " +
+                firstBid[0] + "个" + firstBid[1] + (firstBid[2] == 1 ? " (斋)" : ""));
+
+        // 5. 测试场景 B：上家叫了一个非常夸张的点数 (测试概率判定)
+        // 叫 8 个 6（一共才 10 个骰子，这显然是吹牛）
+        int[] highBid = {8, 6, 0};
+        int[] reaction = bot.makeDecision(highBid, totalDice);
+
+        System.out.print("场景 B (上家叫 8个6) -> AI 反应: ");
+        if (reaction == null) {
+            System.out.println("“我不信！开你！” (AI 返回 null)");
+        } else {
+            System.out.println("“我跟！” AI 叫: " + reaction[0] + "个" + reaction[1]);
+        }
+
+        // 6. 测试场景 C：上家叫了一个合理的点数
+        int[] normalBid = {3, 4, 0};
+        int[] followBid = bot.makeDecision(normalBid, totalDice);
+        System.out.println("场景 C (上家叫 3个4) -> AI 反应: AI 叫: " +
+                followBid[0] + "个" + followBid[1]);
     }
 }

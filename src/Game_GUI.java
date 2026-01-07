@@ -21,6 +21,7 @@ public class Game_GUI extends JFrame {
     private JComboBox<Integer> qtyCombo;
     private JComboBox<Integer> faceCombo;
     private JLabel statusLabel;
+    private JLabel nowPlayingLabel;
     private JPanel dicePanel;
     private JButton bidFeiBtn, bidZhaiBtn, openBtn;
     private JButton ppBtn;
@@ -34,7 +35,7 @@ public class Game_GUI extends JFrame {
     private boolean isPaused = false;
     private long clipTimePosition = 0;
 
-    // --- 🎭 垃圾话系统数据库 (完整保留) ---
+    // --- 🎭 垃圾话系统数据库 ---
     private final String[] TALK_BID = {
             "就这？我闭着眼都能赢。", "我看你印堂发黑，这把必输。", "这就是你的实力吗？",
             "如果你这把能赢，我当场把骰子吃掉！", "你的骰子是在拼多多买的吧？", "我赌你的杯子里没有 6。"
@@ -59,7 +60,6 @@ public class Game_GUI extends JFrame {
         loadResources();
         loadPlaylist();
 
-        // 自动体检
         checkMusicEnvironment();
 
         game.addPlayer(aiFactory.new AIPlayer(engine, playerName, 0));
@@ -74,38 +74,18 @@ public class Game_GUI extends JFrame {
         startNewRound(0);
     }
 
-    // --- 🔍 音乐体检工具 (针对 resources/res 路径) ---
     private void checkMusicEnvironment() {
-        System.out.println("\n--- 🔍 音乐环境体检 (resources/res) ---");
-        // 尝试两种常见的 resources 路径表示
+        System.out.println("\n--- 🔍 音乐环境体检 ---");
         File folder = new File("resources/res");
-        if (!folder.exists()) {
-            folder = new File("src/main/resources/res"); // 适配 Maven 结构
-        }
+        if (!folder.exists()) folder = new File("src/main/resources/res");
 
-        if (!folder.exists()) {
-            System.err.println("❌ 仍然找不到文件夹！");
-            System.err.println("   尝试路径: " + folder.getAbsolutePath());
-        } else {
+        if (folder.exists()) {
             System.out.println("✅ 成功定位文件夹: " + folder.getAbsolutePath());
-            File[] files = folder.listFiles();
-            if (files == null || files.length == 0) {
-                System.err.println("❌ 文件夹是空的！");
-            } else {
-                for (File f : files) {
-                    if (f.getName().toLowerCase().endsWith(".wav"))
-                        System.out.println("🎵 发现音乐: " + f.getName());
-                    else if (f.getName().toLowerCase().endsWith(".mp3"))
-                        System.err.println("⚠️ 发现 MP3 (Java不支持): " + f.getName());
-                }
-            }
         }
         System.out.println("--- 🏁 体检结束 ---\n");
     }
 
-    // --- 🎼 音乐控制逻辑 ---
     private void loadPlaylist() {
-        // 优先找 resources/res
         File folder = new File("resources/res");
         if (!folder.exists()) folder = new File("src/main/resources/res");
 
@@ -129,9 +109,14 @@ public class Game_GUI extends JFrame {
                 musicClip.stop();
                 musicClip.close();
             }
-            AudioInputStream stream = AudioSystem.getAudioInputStream(playlist.get(currentTrackIndex));
+            File musicFile = playlist.get(currentTrackIndex);
+            AudioInputStream stream = AudioSystem.getAudioInputStream(musicFile);
             musicClip = AudioSystem.getClip();
             musicClip.open(stream);
+
+            if (nowPlayingLabel != null) {
+                nowPlayingLabel.setText("🎵 正在播放: " + musicFile.getName());
+            }
 
             musicClip.addLineListener(e -> {
                 if (e.getType() == LineEvent.Type.STOP && !isPaused) {
@@ -149,48 +134,6 @@ public class Game_GUI extends JFrame {
         } catch (Exception e) { e.printStackTrace(); }
     }
 
-    private String getTalk(String[] origin, ArrayList<String> pool) {
-        if (pool.isEmpty()) {
-            pool.addAll(Arrays.asList(origin));
-            Collections.shuffle(pool);
-        }
-        return pool.remove(0);
-    }
-
-    private void loadResources() {
-        try {
-            Image iconImg = loadOneImage("logo.png");
-            if (iconImg != null) {
-                this.setIconImage(iconImg);
-                if (Taskbar.isTaskbarSupported()) Taskbar.getTaskbar().setIconImage(iconImg);
-            }
-            for (int i = 1; i <= 6; i++) {
-                Image diceImg = loadOneImage(i + ".jpg");
-                if (diceImg == null) diceImg = loadOneImage(i + ".png");
-                if (diceImg != null) {
-                    diceIcons[i] = new ImageIcon(diceImg.getScaledInstance(60, 60, Image.SCALE_SMOOTH));
-                }
-            }
-        } catch (Exception e) { e.printStackTrace(); }
-    }
-
-    private Image loadOneImage(String fileName) {
-        // 尝试多种路径，确保能读到 resources/res
-        String[] paths = {
-                "resources/res/" + fileName,
-                "src/main/resources/res/" + fileName,
-                "res/" + fileName
-        };
-        for (String p : paths) {
-            File f = new File(p);
-            if (f.exists()) return new ImageIcon(f.getPath()).getImage();
-        }
-        // 尝试类加载器
-        URL url = getClass().getResource("/res/" + fileName);
-        if (url != null) return new ImageIcon(url).getImage();
-        return null;
-    }
-
     private void setupUI() {
         setTitle("🎲 大话骰竞技场 - " + playerName);
         setSize(1100, 850);
@@ -199,31 +142,42 @@ public class Game_GUI extends JFrame {
         getContentPane().setBackground(new Color(30, 33, 39));
         setLayout(new BorderLayout(10, 10));
 
+        // --- 顶部面板 (高度压缩至 140，解决黑区过大问题) ---
         JPanel northPanel = new JPanel();
         northPanel.setLayout(new BoxLayout(northPanel, BoxLayout.Y_AXIS));
         northPanel.setOpaque(false);
-        northPanel.setPreferredSize(new Dimension(0, 140));
+        northPanel.setPreferredSize(new Dimension(0, 100));
 
+        // 1. 回合状态
         statusLabel = new JLabel("游戏准备中...", JLabel.CENTER);
         statusLabel.setFont(new Font("微软雅黑", Font.BOLD, 26));
         statusLabel.setForeground(new Color(97, 175, 239));
         statusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        statusLabel.setBorder(BorderFactory.createEmptyBorder(20, 0, 10, 0));
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 5, 0));
 
-        JPanel musicCtrl = new JPanel(new FlowLayout(FlowLayout.CENTER, 40, 0));
+        // 2. 紧凑播放器面板
+        JPanel playerContainer = new JPanel();
+        playerContainer.setLayout(new BoxLayout(playerContainer, BoxLayout.Y_AXIS));
+        playerContainer.setOpaque(false);
+        playerContainer.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        nowPlayingLabel = new JLabel("🎵 正在播放: ---", JLabel.CENTER);
+        nowPlayingLabel.setFont(new Font("微软雅黑", Font.PLAIN, 13));
+        nowPlayingLabel.setForeground(new Color(152, 195, 121));
+        nowPlayingLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JPanel musicCtrl = new JPanel(new FlowLayout(FlowLayout.CENTER, 40, 0)); // 垂直间距设为 0
         musicCtrl.setOpaque(false);
-
         JButton prevBtn = new JButton("⏮");
         ppBtn = new JButton("⏸");
         JButton nextBtn = new JButton("⏭");
 
         for (JButton b : new JButton[]{prevBtn, ppBtn, nextBtn}) {
-            b.setFont(new Font("SansSerif", Font.PLAIN, 32));
+            b.setFont(new Font("SansSerif", Font.PLAIN, 30));
             b.setForeground(Color.WHITE);
             b.setContentAreaFilled(false);
             b.setBorderPainted(false);
             b.setFocusPainted(false);
-            b.setOpaque(false);
             b.setCursor(new Cursor(Cursor.HAND_CURSOR));
             musicCtrl.add(b);
         }
@@ -245,29 +199,31 @@ public class Game_GUI extends JFrame {
             }
         });
 
+        playerContainer.add(nowPlayingLabel);
+        playerContainer.add(musicCtrl);
+
         northPanel.add(statusLabel);
-        northPanel.add(musicCtrl);
+        northPanel.add(playerContainer);
         add(northPanel, BorderLayout.NORTH);
 
+        // --- 中部日志区 ---
         logArea = new JTextPane();
         logArea.setEditable(false);
         logArea.setBackground(new Color(40, 44, 52));
         logArea.setForeground(new Color(171, 178, 191));
         logArea.setFont(new Font("微软雅黑", Font.PLAIN, 18));
         logArea.setMargin(new Insets(20, 20, 20, 20));
-
         StyledDocument doc = logArea.getStyledDocument();
         SimpleAttributeSet center = new SimpleAttributeSet();
         StyleConstants.setAlignment(center, StyleConstants.ALIGN_CENTER);
         logArea.setParagraphAttributes(center, false);
-
         JScrollPane logScroll = new JScrollPane(logArea);
         logScroll.setBorder(null);
         add(logScroll, BorderLayout.CENTER);
 
+        // --- 底部面板 ---
         JPanel bottom = new JPanel(new BorderLayout());
         bottom.setOpaque(false);
-
         dicePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
         dicePanel.setBackground(new Color(40, 44, 52));
         dicePanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(Color.GRAY), " 我的骰子 ", 0, 0, null, Color.WHITE));
@@ -275,11 +231,9 @@ public class Game_GUI extends JFrame {
 
         JPanel ctrl = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 25));
         ctrl.setBackground(new Color(30, 33, 39));
-
         qtyCombo = new JComboBox<>();
         qtyCombo.setPreferredSize(new Dimension(100, 50));
         qtyCombo.setFont(new Font("Arial", Font.BOLD, 26));
-
         faceCombo = new JComboBox<>(new Integer[]{1, 2, 3, 4, 5, 6});
         faceCombo.setPreferredSize(new Dimension(100, 50));
         faceCombo.setFont(new Font("Arial", Font.BOLD, 26));
@@ -292,11 +246,9 @@ public class Game_GUI extends JFrame {
         bidFeiBtn = new JButton(" 叫飞 ");
         styleBtn(bidFeiBtn, new Color(152, 195, 121), Color.BLACK);
         bidFeiBtn.addActionListener(e -> handleBid(false));
-
         bidZhaiBtn = new JButton(" 叫斋 ");
         styleBtn(bidZhaiBtn, new Color(97, 175, 239), Color.BLACK);
         bidZhaiBtn.addActionListener(e -> handleBid(true));
-
         openBtn = new JButton(" 开牌 ");
         styleBtn(openBtn, new Color(224, 108, 117), Color.WHITE);
         openBtn.addActionListener(e -> handleOpen());
@@ -304,9 +256,34 @@ public class Game_GUI extends JFrame {
         ctrl.add(new JLabel("<html><font color='white'>数量:</font></html>")); ctrl.add(qtyCombo);
         ctrl.add(new JLabel("<html><font color='white'>点数:</font></html>")); ctrl.add(faceCombo);
         ctrl.add(bidFeiBtn); ctrl.add(bidZhaiBtn); ctrl.add(openBtn);
-
         bottom.add(ctrl, BorderLayout.SOUTH);
         add(bottom, BorderLayout.SOUTH);
+    }
+
+    private Image loadOneImage(String fileName) {
+        String[] paths = {"resources/res/" + fileName, "src/main/resources/res/" + fileName, "res/" + fileName};
+        for (String p : paths) {
+            File f = new File(p);
+            if (f.exists()) return new ImageIcon(f.getPath()).getImage();
+        }
+        URL url = getClass().getResource("/res/" + fileName);
+        if (url != null) return new ImageIcon(url).getImage();
+        return null;
+    }
+
+    private void loadResources() {
+        try {
+            Image iconImg = loadOneImage("logo.png");
+            if (iconImg != null) {
+                this.setIconImage(iconImg);
+                if (Taskbar.isTaskbarSupported()) Taskbar.getTaskbar().setIconImage(iconImg);
+            }
+            for (int i = 1; i <= 6; i++) {
+                Image diceImg = loadOneImage(i + ".jpg");
+                if (diceImg == null) diceImg = loadOneImage(i + ".png");
+                if (diceImg != null) diceIcons[i] = new ImageIcon(diceImg.getScaledInstance(60, 60, Image.SCALE_SMOOTH));
+            }
+        } catch (Exception e) { e.printStackTrace(); }
     }
 
     private void showVisualResult(String textResult) {
@@ -315,83 +292,51 @@ public class Game_GUI extends JFrame {
         dialog.setUndecorated(true);
         ((JPanel)dialog.getContentPane()).setBorder(BorderFactory.createLineBorder(new Color(97, 175, 239), 3));
         dialog.setLayout(new BorderLayout());
-
         JPanel mainContent = new JPanel(new GridBagLayout());
         mainContent.setOpaque(false);
         GridBagConstraints gbc = new GridBagConstraints();
-
         int rowCount = 0;
         for (Dice_Player.Player p : game.getPlayers()) {
-            gbc.gridy = rowCount++;
-            gbc.insets = new Insets(10, 30, 10, 30);
+            gbc.gridy = rowCount++; gbc.insets = new Insets(10, 30, 10, 30);
             gbc.gridx = 0; gbc.anchor = GridBagConstraints.EAST;
-            JLabel nameLbl = new JLabel(p.getName() + ": ");
-            nameLbl.setForeground(new Color(229, 192, 123));
-            nameLbl.setFont(new Font("微软雅黑", Font.BOLD, 17));
-            mainContent.add(nameLbl, gbc);
-
+            JLabel nLbl = new JLabel(p.getName() + ": ");
+            nLbl.setForeground(new Color(229, 192, 123)); nLbl.setFont(new Font("微软雅黑", Font.BOLD, 17));
+            mainContent.add(nLbl, gbc);
             gbc.gridx = 1; gbc.anchor = GridBagConstraints.WEST;
-            JPanel diceRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            diceRow.setOpaque(false);
+            JPanel dRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0)); dRow.setOpaque(false);
             for (Dice_Player.Dice d : p.getDice()) {
-                JLabel imgLbl = new JLabel("", JLabel.CENTER);
-                imgLbl.setPreferredSize(new Dimension(46, 46));
-                imgLbl.setOpaque(true); imgLbl.setBackground(Color.WHITE);
-                imgLbl.setBorder(BorderFactory.createLineBorder(new Color(171, 178, 191), 1));
+                JLabel iLbl = new JLabel("", JLabel.CENTER); iLbl.setPreferredSize(new Dimension(46, 46));
+                iLbl.setOpaque(true); iLbl.setBackground(Color.WHITE);
+                iLbl.setBorder(BorderFactory.createLineBorder(new Color(171, 178, 191), 1));
                 if (diceIcons[d.getValue()] != null) {
-                    Image small = diceIcons[d.getValue()].getImage().getScaledInstance(40, 40, Image.SCALE_SMOOTH);
-                    imgLbl.setIcon(new ImageIcon(small));
-                } else {
-                    imgLbl.setText(String.valueOf(d.getValue()));
-                    imgLbl.setFont(new Font("Arial", Font.BOLD, 20));
-                }
-                diceRow.add(imgLbl);
+                    iLbl.setIcon(new ImageIcon(diceIcons[d.getValue()].getImage().getScaledInstance(40, 40, Image.SCALE_SMOOTH)));
+                } else { iLbl.setText(String.valueOf(d.getValue())); iLbl.setFont(new Font("Arial", Font.BOLD, 20)); }
+                dRow.add(iLbl);
             }
-            mainContent.add(diceRow, gbc);
+            mainContent.add(dRow, gbc);
         }
-
-        JScrollPane scrollPane = new JScrollPane(mainContent);
-        scrollPane.setOpaque(false); scrollPane.getViewport().setOpaque(false); scrollPane.setBorder(null);
-
-        JPanel southPanel = new JPanel();
-        southPanel.setLayout(new BoxLayout(southPanel, BoxLayout.Y_AXIS));
-        southPanel.setOpaque(false);
-
-        JLabel resLbl = new JLabel("<html><div style='text-align: center; color: #61afef; width: 450px;'>" +
-                textResult.replaceAll("\n", "<br>") + "</div></html>", JLabel.CENTER);
-        resLbl.setAlignmentX(Component.CENTER_ALIGNMENT);
-        resLbl.setFont(new Font("微软雅黑", Font.BOLD, 16));
-        resLbl.setBorder(BorderFactory.createEmptyBorder(20, 0, 10, 0));
-
-        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 40, 20));
-        btnPanel.setOpaque(false);
-        JButton nextBtn = new JButton(" 继续游戏 "); styleBtn(nextBtn, new Color(152, 195, 121), Color.BLACK);
-        JButton quitBtn = new JButton(" 不玩了 "); styleBtn(quitBtn, new Color(224, 108, 117), Color.WHITE);
-        nextBtn.addActionListener(e -> dialog.dispose());
-        quitBtn.addActionListener(e -> System.exit(0));
-        btnPanel.add(nextBtn); btnPanel.add(quitBtn);
-        southPanel.add(resLbl); southPanel.add(btnPanel);
-
-        dialog.add(scrollPane, BorderLayout.CENTER);
-        dialog.add(southPanel, BorderLayout.SOUTH);
-        dialog.setSize(750, 600);
-        dialog.setLocationRelativeTo(this);
-        dialog.setVisible(true);
+        JScrollPane sp = new JScrollPane(mainContent); sp.setOpaque(false); sp.getViewport().setOpaque(false); sp.setBorder(null);
+        JPanel sPnl = new JPanel(); sPnl.setLayout(new BoxLayout(sPnl, BoxLayout.Y_AXIS)); sPnl.setOpaque(false);
+        JLabel rLbl = new JLabel("<html><div style='text-align: center; color: #61afef; width: 450px;'>" + textResult.replaceAll("\n", "<br>") + "</div></html>", JLabel.CENTER);
+        rLbl.setAlignmentX(Component.CENTER_ALIGNMENT); rLbl.setFont(new Font("微软雅黑", Font.BOLD, 16)); rLbl.setBorder(BorderFactory.createEmptyBorder(20, 0, 10, 0));
+        JPanel bPnl = new JPanel(new FlowLayout(FlowLayout.CENTER, 40, 20)); bPnl.setOpaque(false);
+        JButton nBtn = new JButton(" 继续游戏 "); styleBtn(nBtn, new Color(152, 195, 121), Color.BLACK);
+        JButton qBtn = new JButton(" 不玩了 "); styleBtn(qBtn, new Color(224, 108, 117), Color.WHITE);
+        nBtn.addActionListener(e -> dialog.dispose()); qBtn.addActionListener(e -> System.exit(0));
+        bPnl.add(nBtn); bPnl.add(qBtn); sPnl.add(rLbl); sPnl.add(bPnl);
+        dialog.add(sp, BorderLayout.CENTER); dialog.add(sPnl, BorderLayout.SOUTH);
+        dialog.setSize(750, 600); dialog.setLocationRelativeTo(this); dialog.setVisible(true);
     }
 
     private void updateQtyOptions(boolean isZhaiIntent) {
         if (game.getCurrentPlayer() == null || !game.getCurrentPlayer().getName().equals(playerName)) return;
         qtyCombo.removeAllItems();
-        int n = game.getPlayers().size();
-        int[] cur = game.getCurrentBid();
-        int face = (int) faceCombo.getSelectedItem();
+        int n = game.getPlayers().size(); int[] cur = game.getCurrentBid(); int face = (int) faceCombo.getSelectedItem();
         if (face == 1) isZhaiIntent = true;
         int startMin;
-        if (cur == null) {
-            startMin = isZhaiIntent ? n : (n + 1);
-        } else {
-            int curQty = cur[0], curFace = cur[1];
-            boolean curZhai = (cur[2] == 1);
+        if (cur == null) { startMin = isZhaiIntent ? n : (n + 1); }
+        else {
+            int curQty = cur[0], curFace = cur[1]; boolean curZhai = (cur[2] == 1);
             if (!curZhai && isZhaiIntent) startMin = Math.max(n, curQty - 1);
             else if (curZhai && !isZhaiIntent) startMin = curQty * 2;
             else { startMin = (face > curFace) ? curQty : curQty + 1; }
@@ -401,32 +346,22 @@ public class Game_GUI extends JFrame {
 
     private void handleBid(boolean isZhai) {
         if (qtyCombo.getSelectedItem() == null) return;
-        int q = (int) qtyCombo.getSelectedItem();
-        int f = (int) faceCombo.getSelectedItem();
+        int q = (int) qtyCombo.getSelectedItem(); int f = (int) faceCombo.getSelectedItem();
         if (f == 1) isZhai = true;
-        if (game.placeBid(q, f, isZhai)) {
-            log("▶ " + playerName + ": " + q + "个" + f + (isZhai ? " [斋]" : " [飞]") + "\n");
-            checkTurn();
-        }
+        if (game.placeBid(q, f, isZhai)) { log("▶ " + playerName + ": " + q + "个" + f + (isZhai ? " [斋]" : " [飞]") + "\n"); checkTurn(); }
     }
 
     private void handleOpen() {
-        String res = game.challenge();
-        log("\n" + res + "\n");
-        showVisualResult(res);
-        startNewRound(game.getLastLoserIndex());
+        String res = game.challenge(); log("\n" + res + "\n"); showVisualResult(res); startNewRound(game.getLastLoserIndex());
     }
 
     private void updateDice() {
         dicePanel.removeAll();
         for (Dice_Player.Dice d : game.getPlayers().get(0).getDice()) {
-            int val = d.getValue();
-            JLabel l = new JLabel("", JLabel.CENTER);
-            l.setPreferredSize(new Dimension(65, 65));
-            l.setOpaque(true); l.setBackground(Color.WHITE);
-            l.setBorder(BorderFactory.createLineBorder(new Color(97, 175, 239), 3));
-            if (diceIcons[val] != null) l.setIcon(diceIcons[val]);
-            else { l.setText(String.valueOf(val)); l.setFont(new Font("Arial", Font.BOLD, 28)); }
+            JLabel l = new JLabel("", JLabel.CENTER); l.setPreferredSize(new Dimension(65, 65));
+            l.setOpaque(true); l.setBackground(Color.WHITE); l.setBorder(BorderFactory.createLineBorder(new Color(97, 175, 239), 3));
+            if (diceIcons[d.getValue()] != null) l.setIcon(diceIcons[d.getValue()]);
+            else { l.setText(String.valueOf(d.getValue())); l.setFont(new Font("Arial", Font.BOLD, 28)); }
             dicePanel.add(l);
         }
         dicePanel.revalidate(); dicePanel.repaint();
@@ -436,14 +371,10 @@ public class Game_GUI extends JFrame {
         Dice_Player.Player actor = game.getCurrentPlayer();
         if (actor.getName().equals(playerName)) {
             statusLabel.setText("🟢 你的回合");
-            if (new Random().nextInt(100) < 20) {
-                log("🤖 AI 盯着你幽幽地说：「" + getTalk(TALK_PRESSURE, pressurePool) + "」\n");
-            }
-            setUIEnabled(true); updateQtyOptions(false);
-            openBtn.setEnabled(game.getCurrentBid() != null);
+            if (new Random().nextInt(100) < 20) log("🤖 AI 盯：「" + getTalk(TALK_PRESSURE, pressurePool) + "」\n");
+            setUIEnabled(true); updateQtyOptions(false); openBtn.setEnabled(game.getCurrentBid() != null);
         } else {
-            statusLabel.setText("🤖 " + actor.getName() + " 思考中...");
-            setUIEnabled(false); runAI();
+            statusLabel.setText("🤖 " + actor.getName() + " 思考中..."); setUIEnabled(false); runAI();
         }
     }
 
@@ -458,14 +389,13 @@ public class Game_GUI extends JFrame {
                 try {
                     int[] d = get();
                     if (d == null) {
-                        log("💥 " + aiName + " 拍案而起：「" + getTalk(TALK_OPEN, openPool) + "」 开牌！\n");
+                        log("💥 " + aiName + "：「" + getTalk(TALK_OPEN, openPool) + "」 开牌！\n");
                         handleOpen();
                     } else {
                         game.placeBid(d[0], d[1], d[2] == 1);
                         String content = "▶ " + aiName + ": " + d[0] + "个" + d[1] + (d[2]==1?" [斋]":" [飞]");
                         if (new Random().nextInt(100) < 30) content += "  💬 「" + getTalk(TALK_BID, bidPool) + "」";
-                        log(content + "\n");
-                        checkTurn();
+                        log(content + "\n"); checkTurn();
                     }
                 } catch (Exception e) {}
             }
@@ -473,28 +403,26 @@ public class Game_GUI extends JFrame {
     }
 
     private void startNewRound(int loserIdx) {
-        game.startNewRound(loserIdx);
-        roundCounter++;
-        logArea.setText("");
+        game.startNewRound(loserIdx); roundCounter++; logArea.setText("");
         String line = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-        String title = String.format("第 %d 局 比赛\n", roundCounter);
-        log("\n" + line + title + line + "\n");
-        updateDice();
-        checkTurn();
+        log("\n" + line + String.format("第 %d 局 比赛\n", roundCounter) + line + "\n");
+        updateDice(); checkTurn();
     }
 
     private void styleBtn(JButton b, Color bg, Color fg) {
-        b.setPreferredSize(new Dimension(120, 50));
-        b.setBackground(bg); b.setForeground(fg);
-        b.setOpaque(true); b.setBorderPainted(false);
-        b.setFont(new Font("微软雅黑", Font.BOLD, 16));
-        b.setFocusPainted(false);
+        b.setPreferredSize(new Dimension(120, 50)); b.setBackground(bg); b.setForeground(fg);
+        b.setOpaque(true); b.setBorderPainted(false); b.setFont(new Font("微软雅黑", Font.BOLD, 16)); b.setFocusPainted(false);
     }
 
     private void setUIEnabled(boolean b) {
         qtyCombo.setEnabled(b); faceCombo.setEnabled(b);
         bidFeiBtn.setEnabled(b && (int)faceCombo.getSelectedItem() != 1);
         bidZhaiBtn.setEnabled(b); openBtn.setEnabled(b);
+    }
+
+    private String getTalk(String[] origin, ArrayList<String> pool) {
+        if (pool.isEmpty()) { pool.addAll(Arrays.asList(origin)); Collections.shuffle(pool); }
+        return pool.remove(0);
     }
 
     private void initSettings() {
@@ -505,11 +433,7 @@ public class Game_GUI extends JFrame {
     }
 
     private void log(String msg) {
-        try {
-            Document doc = logArea.getDocument();
-            doc.insertString(doc.getLength(), msg, null);
-            logArea.setCaretPosition(doc.getLength());
-        } catch (Exception e) { e.printStackTrace(); }
+        try { Document doc = logArea.getDocument(); doc.insertString(doc.getLength(), msg, null); logArea.setCaretPosition(doc.getLength()); } catch (Exception e) {}
     }
 
     public static void main(String[] args) { SwingUtilities.invokeLater(Game_GUI::new); }

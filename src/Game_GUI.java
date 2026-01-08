@@ -220,9 +220,10 @@ public class Game_GUI extends JFrame {
         qtyCombo.setPreferredSize(new Dimension(100, 50));
         qtyCombo.setFont(new Font("Arial", Font.BOLD, 26));
 
+        // 监听下拉框展开，刷新选项
         qtyCombo.addPopupMenuListener(new PopupMenuListener() {
             public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
-                updateQtyOptions((int) faceCombo.getSelectedItem() == 1);
+                updateQtyOptions();
             }
             public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {}
             public void popupMenuCanceled(PopupMenuEvent e) {}
@@ -232,7 +233,7 @@ public class Game_GUI extends JFrame {
         faceCombo.setPreferredSize(new Dimension(100, 50));
         faceCombo.setFont(new Font("Arial", Font.BOLD, 26));
         faceCombo.addActionListener(e -> {
-            updateQtyOptions((int) faceCombo.getSelectedItem() == 1);
+            updateQtyOptions();
         });
 
         bidFeiBtn = new JButton(" 叫飞 ");
@@ -278,47 +279,25 @@ public class Game_GUI extends JFrame {
         } catch (Exception e) { e.printStackTrace(); }
     }
 
-    // --- 🚨 规则计算核心：整合 GPT 修复后的逻辑 🚨 ---
-    private int getRequiredMin(int face, boolean isZhaiIntent) {
-        int n = game.getPlayers().size();
-        int[] cur = game.getCurrentBid();
-
-        if (cur == null) return n; // 首叫
-
-        int curQty = cur[0];
-        int curFace = cur[1];
-        boolean curIsZhai = (cur[2] == 1);
-
-        if (curIsZhai && !isZhaiIntent) {
-            return curQty * 2; // 斋变飞：翻倍
-        } else if (!curIsZhai && isZhaiIntent) {
-            return (int) Math.ceil(curQty / 2.0); // 飞变斋：减半向上取整
-        } else {
-            // 同状态
-            return (face > curFace) ? curQty : curQty + 1;
-        }
-    }
-
-    private void updateQtyOptions(boolean isZhaiIntent) {
+    private void updateQtyOptions() {
         if (game.getCurrentPlayer() == null || !game.getCurrentPlayer().getName().equals(playerName)) return;
 
-        int n = game.getPlayers().size();
-        int face = (int) faceCombo.getSelectedItem();
-        if (face == 1) isZhaiIntent = true;
+        int totalDiceInGame = game.getPlayers().size() * 5; // 动态上限：人数 * 5
+        int[] curBid = game.getCurrentBid();
+        int previousQty = (curBid != null) ? curBid[0] : 1;
 
-        int startMin = getRequiredMin(face, isZhaiIntent);
-        if (startMin < n) startMin = n;
-
-        // 这里整合：让最小数量变为上一个人的数量减去1
-        int previousQty = game.getCurrentBid() != null ? game.getCurrentBid()[0] : 1;
-        startMin = Math.max(startMin, previousQty - 1);
+        // 初始最小值通常从 玩家人数 开始（比如2人玩，最少叫2个）
+        int startMin = Math.max(game.getPlayers().size(), previousQty - 1);
 
         Integer currentSelected = (Integer) qtyCombo.getSelectedItem();
         qtyCombo.removeAllItems();
-        for (int i = startMin; i <= n * 6 + 10; i++) {
+
+        // 循环到总骰子数为止
+        for (int i = startMin; i <= totalDiceInGame; i++) {
             qtyCombo.addItem(i);
         }
-        if (currentSelected != null && currentSelected >= startMin) {
+
+        if (currentSelected != null && currentSelected >= startMin && currentSelected <= totalDiceInGame) {
             qtyCombo.setSelectedItem(currentSelected);
         } else {
             qtyCombo.setSelectedIndex(0);
@@ -329,27 +308,55 @@ public class Game_GUI extends JFrame {
         int face = (int) faceCombo.getSelectedItem();
         if (face == 1) isZhai = true;
 
-        // 依据当前的 斋/飞 意图重算一次底线
-        int minAllowed = getRequiredMin(face, isZhai);
+        int[] curBid = game.getCurrentBid();
         int n = game.getPlayers().size();
 
-        // 同时参考 previousQty - 1 逻辑确保按钮操作与下拉框一致
-        int previousQty = game.getCurrentBid() != null ? game.getCurrentBid()[0] : 1;
-        minAllowed = Math.max(minAllowed, previousQty - 1);
-        if (minAllowed < n) minAllowed = n;
-
+        // 获取当前下拉框选择的数量
         Object selected = qtyCombo.getSelectedItem();
         if (selected == null) return;
-
         int q = (int) selected;
-        if (q < minAllowed) q = minAllowed;
 
+        if (curBid != null) {
+            int prevQty = curBid[0];
+            int prevFace = curBid[1];
+            boolean prevIsZhai = (curBid[2] == 1);
+
+            if (!isZhai && prevIsZhai) {
+                // --- 🔴 核心修正：斋变飞逻辑 ---
+                // 规则：数量必须【等于】2倍
+                int requiredQty = prevQty * 2;
+                if (q != requiredQty) {
+                    JOptionPane.showMessageDialog(this, "规则错误：斋变飞数量必须恰好等于 2 倍（即 " + requiredQty + " 个）");
+                    // 自动纠正下拉框，方便玩家直接点击
+                    qtyCombo.setSelectedItem(requiredQty);
+                    return;
+                }
+            } else {
+                // --- 其他常规校验（如：飞变斋、斋变斋等） ---
+                int minAllowed = n;
+                if (isZhai) {
+                    if (!prevIsZhai) minAllowed = Math.max(n, prevQty - 1); // 飞变斋
+                    else minAllowed = (face > prevFace) ? prevQty : prevQty + 1; // 斋变斋
+                } else {
+                    // 飞变飞
+                    minAllowed = (face > prevFace) ? prevQty : prevQty + 1;
+                }
+
+                if (q < minAllowed) {
+                    JOptionPane.showMessageDialog(this, "数量不足！当前操作至少需要叫 " + minAllowed + " 个");
+                    return;
+                }
+            }
+        }
+
+        // 执行叫点
         if (game.placeBid(q, face, isZhai)) {
             log("▶ " + playerName + ": " + q + "个" + face + (isZhai ? " [斋]" : " [飞]") + "\n");
             checkTurn();
         }
     }
 
+    // --- 🚨 修改点：增加退出确认对话框 ---
     private void showVisualResult(String textResult) {
         JDialog dialog = new JDialog(this, "开牌结算", true);
         dialog.getContentPane().setBackground(new Color(40, 44, 52));
@@ -384,9 +391,28 @@ public class Game_GUI extends JFrame {
         JLabel rLbl = new JLabel("<html><div style='text-align: center; color: #61afef; width: 450px;'>" + textResult.replaceAll("\n", "<br>") + "</div></html>", JLabel.CENTER);
         rLbl.setAlignmentX(Component.CENTER_ALIGNMENT); rLbl.setFont(new Font("微软雅黑", Font.BOLD, 16)); rLbl.setBorder(BorderFactory.createEmptyBorder(20, 0, 10, 0));
         JPanel bPnl = new JPanel(new FlowLayout(FlowLayout.CENTER, 40, 20)); bPnl.setOpaque(false);
+
         JButton nBtn = new JButton(" 继续游戏 "); styleBtn(nBtn, new Color(152, 195, 121), Color.BLACK);
         JButton qBtn = new JButton(" 不玩了 "); styleBtn(qBtn, new Color(224, 108, 117), Color.WHITE);
-        nBtn.addActionListener(e -> dialog.dispose()); qBtn.addActionListener(e -> System.exit(0));
+
+        nBtn.addActionListener(e -> dialog.dispose());
+
+        // --- 修改部分：增加二次确认弹窗 ---
+        qBtn.addActionListener(e -> {
+            int choice = JOptionPane.showConfirmDialog(
+                    dialog,
+                    "确定要退出游戏吗？",
+                    "退出确认",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE
+            );
+
+            if (choice == JOptionPane.YES_OPTION) {
+                System.exit(0);
+            }
+            // 如果选 NO，什么也不做，对话框关闭，回到结算界面
+        });
+
         bPnl.add(nBtn); bPnl.add(qBtn); sPnl.add(rLbl); sPnl.add(bPnl);
         dialog.add(sp, BorderLayout.CENTER); dialog.add(sPnl, BorderLayout.SOUTH);
         dialog.setSize(750, 600); dialog.setLocationRelativeTo(this); dialog.setVisible(true);
@@ -418,7 +444,7 @@ public class Game_GUI extends JFrame {
             statusLabel.setText("🟢 你的回合");
             if (new Random().nextInt(100) < 20) log("🤖 AI 盯：「" + getTalk(TALK_PRESSURE, pressurePool) + "」\n");
             setUIEnabled(true);
-            updateQtyOptions((int) faceCombo.getSelectedItem() == 1);
+            updateQtyOptions();
             openBtn.setEnabled(game.getCurrentBid() != null);
         } else {
             statusLabel.setText("🤖 " + actor.getName() + " 思考中..."); setUIEnabled(false); runAI();
@@ -441,7 +467,7 @@ public class Game_GUI extends JFrame {
                     } else {
                         game.placeBid(d[0], d[1], d[2] == 1);
                         String content = "▶ " + aiName + ": " + d[0] + "个" + d[1] + (d[2]==1?" [斋]":" [飞]");
-                        if (new Random().nextInt(100) < 30) content += "   💬 「" + getTalk(TALK_BID, bidPool) + "」";
+                        if (new Random().nextInt(100) < 30) content += " 💬 「" + getTalk(TALK_BID, bidPool) + "」";
                         log(content + "\n"); checkTurn();
                     }
                 } catch (Exception e) {}
